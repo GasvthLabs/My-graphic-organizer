@@ -1,0 +1,587 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Neon Flow Builder</title>
+    
+    <!-- Tailwind CSS para diseño base -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- HTML2Canvas para descargar PNG -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+    <!-- Google Fonts: Estética hacker/cyberpunk -->
+    <link href="https://fonts.googleapis.com/css2?family=Share+Tech+Mono&display=swap" rel="stylesheet">
+
+    <style>
+        :root {
+            --bg-color: #08080c;
+            --grid-color: #1a1a2e;
+            --neon-cyan: #00ffff;
+            --neon-cyan-dim: rgba(0, 255, 255, 0.15);
+            --neon-magenta: #ff00ff;
+            --neon-red: #ff0055;
+            --text-color: #e0e0e0;
+        }
+
+        body {
+            font-family: 'Share Tech Mono', monospace;
+            background-color: var(--bg-color);
+            color: var(--text-color);
+            margin: 0;
+            overflow: hidden; 
+        }
+
+        #viewport {
+            overflow: auto;
+            width: 100vw;
+            height: calc(100vh - 4rem);
+            position: relative;
+        }
+
+        /* Scrollbars del viewport */
+        #viewport::-webkit-scrollbar { width: 12px; height: 12px; }
+        #viewport::-webkit-scrollbar-track { background: var(--bg-color); }
+        #viewport::-webkit-scrollbar-thumb { background: #1a1a2e; border: 1px solid var(--neon-cyan-dim); border-radius: 6px; }
+
+        #workspace {
+            width: 5000px;
+            height: 5000px;
+            position: absolute;
+            top: 0; left: 0;
+            transform-origin: 0 0;
+            background-image: 
+                linear-gradient(var(--grid-color) 1px, transparent 1px),
+                linear-gradient(90deg, var(--grid-color) 1px, transparent 1px);
+            background-size: 40px 40px;
+            background-position: center center;
+            transition: transform 0.1s ease-out;
+        }
+
+        .neon-node {
+            position: absolute;
+            width: 250px;
+            height: 150px;
+            min-width: 150px;
+            min-height: 100px;
+            background-color: rgba(8, 8, 12, 0.95);
+            border: 2px solid var(--neon-cyan);
+            box-shadow: 0 0 10px var(--neon-cyan-dim), inset 0 0 15px var(--neon-cyan-dim);
+            backdrop-filter: blur(5px);
+            display: flex;
+            flex-direction: column;
+            resize: both; /* Permite redimensionar */
+            overflow: hidden; /* Necesario para que resize funcione */
+        }
+
+        /* Esquina de redimensionamiento */
+        .neon-node::-webkit-resizer {
+            background-image: linear-gradient(135deg, transparent 50%, var(--neon-cyan) 50%);
+            background-size: 100% 100%;
+        }
+
+        /* Barra superior de arrastre */
+        .drag-handle {
+            height: 32px;
+            background: rgba(0, 255, 255, 0.1);
+            border-bottom: 1px solid var(--neon-cyan);
+            cursor: grab;
+            display: flex;
+            align-items: center;
+            justify-content: space-between; /* Mantiene la X a la derecha */
+            padding: 0 8px;
+            user-select: none;
+            flex-shrink: 0; /* Evita que se aplaste al achicar la caja */
+        }
+        .drag-handle:active { cursor: grabbing; }
+
+        /* Botón borrar GARANTIZADO VISIBLE */
+        .delete-node-btn {
+            color: var(--neon-red);
+            border: 1px solid var(--neon-red);
+            background: rgba(255, 0, 85, 0.1);
+            font-weight: bold;
+            font-size: 16px;
+            line-height: 1;
+            cursor: pointer;
+            width: 22px;
+            height: 22px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            border-radius: 2px;
+            transition: all 0.2s;
+            z-index: 10; /* Siempre por encima */
+        }
+        .delete-node-btn:hover {
+            background: var(--neon-red);
+            color: #fff;
+            box-shadow: 0 0 10px var(--neon-red);
+        }
+
+        /* Área de texto editable */
+        .node-content {
+            flex-grow: 1;
+            width: 100%;
+            height: 100%;
+            background: transparent;
+            border: none;
+            color: var(--text-color);
+            padding: 10px;
+            font-family: 'Share Tech Mono', monospace;
+            font-size: 14px;
+            outline: none;
+            resize: none; 
+            white-space: pre-wrap;
+            overflow-y: auto;
+            word-wrap: break-word;
+            box-sizing: border-box;
+        }
+
+        .neon-node.selected-for-connection {
+            border-color: var(--neon-magenta);
+            box-shadow: 0 0 15px var(--neon-magenta), inset 0 0 15px rgba(255,0,255,0.2);
+            animation: pulse 1.5s infinite;
+        }
+
+        @keyframes pulse {
+            0% { box-shadow: 0 0 10px var(--neon-magenta); }
+            50% { box-shadow: 0 0 25px var(--neon-magenta), inset 0 0 10px var(--neon-magenta); }
+            100% { box-shadow: 0 0 10px var(--neon-magenta); }
+        }
+
+        .neon-btn {
+            background: rgba(0,255,255,0.05);
+            color: var(--neon-cyan);
+            border: 1px solid var(--neon-cyan);
+            padding: 8px 12px;
+            font-weight: bold;
+            cursor: pointer;
+            transition: all 0.3s ease;
+        }
+        .neon-btn:hover { background: var(--neon-cyan); color: #000; box-shadow: 0 0 15px var(--neon-cyan); }
+        
+        .neon-btn.active-magenta {
+            border-color: var(--neon-magenta);
+            color: var(--neon-magenta);
+            background: rgba(255,0,255,0.05);
+            box-shadow: 0 0 10px rgba(255,0,255,0.4);
+        }
+        .neon-btn.active-magenta:hover { background: var(--neon-magenta); color: #000; box-shadow: 0 0 20px var(--neon-magenta); }
+
+        .connection-group { cursor: pointer; }
+        .connection-group:hover .connection-path {
+            stroke: #fff;
+            stroke-width: 3;
+            filter: drop-shadow(0 0 8px var(--neon-magenta));
+        }
+        .connection-hit-area { fill: none; stroke: transparent; stroke-width: 25; pointer-events: stroke; }
+        .connection-path {
+            fill: none; stroke: var(--neon-magenta); stroke-width: 2;
+            stroke-dasharray: 4, 4; pointer-events: none; 
+            transition: stroke 0.2s, stroke-width 0.2s;
+        }
+
+        .hide-on-export { display: none !important; }
+    </style>
+</head>
+<body class="flex flex-col h-screen w-screen">
+
+    <header class="h-16 border-b border-[#00ffff] bg-[#08080c] flex items-center justify-between px-4 lg:px-6 z-20 shadow-[0_0_15px_rgba(0,255,255,0.2)] shrink-0">
+        <div class="flex items-center gap-4">
+            <h1 class="text-xl font-bold text-[#00ffff] drop-shadow-[0_0_8px_#00ffff]">NEON_FLOW</h1>
+            
+            <!-- Controles de Zoom -->
+            <div class="hidden sm:flex items-center gap-1 bg-[#1a1a2e] px-2 py-1 rounded border border-[#00ffff] border-opacity-30 ml-4">
+                <button id="zoomOutBtn" class="text-[#00ffff] hover:text-white px-2 font-bold">-</button>
+                <span id="zoomDisplay" class="text-xs text-[#00ffff] w-12 text-center">100%</span>
+                <button id="zoomInBtn" class="text-[#00ffff] hover:text-white px-2 font-bold">+</button>
+                <button id="zoomResetBtn" class="text-[10px] text-gray-400 hover:text-white ml-1 px-1">R</button>
+            </div>
+        </div>
+
+        <div class="flex gap-2 lg:gap-3 flex-wrap justify-end">
+            <button id="addNodeBtn" class="neon-btn">+ BLOQUE</button>
+            <button id="connectModeBtn" class="neon-btn">CONECTAR: OFF</button>
+            <button id="downloadBtn" class="neon-btn !border-white !text-white hover:!bg-white hover:!text-black">DESCARGAR</button>
+        </div>
+    </header>
+
+    <main id="viewport">
+        <div id="workspace">
+            <!-- Capa SVG para las flechas -->
+            <svg id="linesCanvas" class="absolute inset-0 w-full h-full pointer-events-none z-0">
+                <defs>
+                    <marker id="arrowhead" markerWidth="14" markerHeight="12" refX="10" refY="6" orient="auto">
+                        <polygon points="0 1, 12 6, 0 11" fill="#ff00ff" stroke="none" />
+                    </marker>
+                </defs>
+            </svg>
+            <!-- Capa para los bloques -->
+            <div id="nodesContainer" class="absolute inset-0 w-full h-full z-10 pointer-events-none"></div>
+        </div>
+    </main>
+
+    <script>
+        const state = {
+            nodes: {}, 
+            connections: [], 
+            nodeCounter: 0,
+            isConnectMode: false,
+            sourceNodeIdForConnection: null,
+            draggedNodeId: null
+        };
+
+        const viewport = document.getElementById('viewport');
+        const workspace = document.getElementById('workspace');
+        const nodesContainer = document.getElementById('nodesContainer');
+        const linesCanvas = document.getElementById('linesCanvas');
+        const zoomDisplay = document.getElementById('zoomDisplay');
+
+        // Zoom Logic
+        let currentScale = 1.0;
+        function setZoom(newScale) {
+            currentScale = Math.max(0.2, Math.min(3.0, newScale));
+            workspace.style.transform = `scale(${currentScale})`;
+            if (zoomDisplay) zoomDisplay.textContent = Math.round(currentScale * 100) + '%';
+        }
+
+        document.getElementById('zoomInBtn').addEventListener('click', () => setZoom(currentScale + 0.1));
+        document.getElementById('zoomOutBtn').addEventListener('click', () => setZoom(currentScale - 0.1));
+        document.getElementById('zoomResetBtn').addEventListener('click', () => setZoom(1.0));
+
+        viewport.addEventListener('wheel', (e) => {
+            if (e.ctrlKey || e.metaKey) {
+                e.preventDefault(); 
+                setZoom(currentScale + (e.deltaY > 0 ? -0.1 : 0.1));
+            }
+        }, { passive: false });
+
+        // Resize Observer to update arrows when a block is resized
+        const nodeResizeObserver = new ResizeObserver(() => drawConnections());
+
+        function createNode(x, y, defaultText = "NUEVO BLOQUE") {
+            const id = 'node_' + state.nodeCounter++;
+            
+            const nodeEl = document.createElement('div');
+            nodeEl.className = 'neon-node pointer-events-auto';
+            nodeEl.id = id;
+            nodeEl.style.left = `${x}px`;
+            nodeEl.style.top = `${y}px`;
+
+            // Asa de arrastre (Contenedor Flex)
+            const dragHandle = document.createElement('div');
+            dragHandle.className = 'drag-handle';
+            
+            const handleTitle = document.createElement('span');
+            handleTitle.style.fontSize = '10px';
+            handleTitle.style.color = 'rgba(0,255,255,0.7)';
+            handleTitle.textContent = ':: DRAG';
+            
+            // Botón X (Eliminar) - Añadido dentro del Flexbox
+            const deleteBtn = document.createElement('div');
+            deleteBtn.className = 'delete-node-btn hide-on-export';
+            deleteBtn.innerHTML = '×';
+            deleteBtn.title = "Eliminar Bloque";
+            
+            deleteBtn.addEventListener('click', (e) => {
+                e.stopPropagation(); // Evita arrastrar o conectar
+                deleteNode(id);
+            });
+
+            dragHandle.appendChild(handleTitle);
+            dragHandle.appendChild(deleteBtn);
+
+            // Área de texto (Editable Div en lugar de Textarea para exportación perfecta con html2canvas)
+            const contentEl = document.createElement('div');
+            contentEl.className = 'node-content';
+            contentEl.contentEditable = 'true';
+            contentEl.innerText = defaultText;
+            
+            // Prevenir pegado con formato (evita que se peguen fondos blancos o fuentes raras de otras webs)
+            contentEl.addEventListener('paste', (e) => {
+                e.preventDefault();
+                const text = e.clipboardData.getData('text/plain');
+                document.execCommand('insertText', false, text);
+            });
+
+            // Ensamblar
+            nodeEl.appendChild(dragHandle);
+            nodeEl.appendChild(contentEl);
+            nodesContainer.appendChild(nodeEl);
+
+            state.nodes[id] = { id, el: nodeEl, x, y };
+            nodeResizeObserver.observe(nodeEl);
+            attachNodeListeners(nodeEl, id);
+            
+            return id;
+        }
+
+        function deleteNode(id) {
+            const node = state.nodes[id];
+            if (node && node.el) {
+                nodeResizeObserver.unobserve(node.el);
+                node.el.remove();
+            }
+            delete state.nodes[id];
+            
+            // Eliminar conexiones huérfanas
+            state.connections = state.connections.filter(c => c.source !== id && c.target !== id);
+            if (state.sourceNodeIdForConnection === id) clearConnectionSelection();
+            
+            drawConnections();
+        }
+
+        let dragStartX = 0, dragStartY = 0, initialNodeX = 0, initialNodeY = 0;
+
+        function attachNodeListeners(nodeEl, id) {
+            // Solo iniciamos drag si clicamos en el dragHandle (y no en el botón X)
+            const dragHandle = nodeEl.querySelector('.drag-handle');
+            dragHandle.addEventListener('mousedown', (e) => {
+                if(e.target.closest('.delete-node-btn')) return;
+                handlePointerDown(e, id);
+            });
+            
+            // Conexión general (si estamos en modo conexión)
+            nodeEl.addEventListener('click', (e) => {
+                if(e.target.closest('.delete-node-btn')) return;
+                if (state.isConnectMode) handleConnectionClick(id);
+            });
+        }
+
+        function handlePointerDown(e, id) {
+            if (state.isConnectMode) return; 
+            
+            state.draggedNodeId = id;
+            const node = state.nodes[id];
+            
+            // Traer al frente
+            nodesContainer.appendChild(node.el);
+
+            dragStartX = e.clientX;
+            dragStartY = e.clientY;
+            initialNodeX = node.x;
+            initialNodeY = node.y;
+        }
+
+        window.addEventListener('mousemove', (e) => {
+            if (!state.draggedNodeId) return;
+
+            // División crucial por el currentScale para que el drag cuadre con el zoom
+            const dx = (e.clientX - dragStartX) / currentScale;
+            const dy = (e.clientY - dragStartY) / currentScale;
+
+            const node = state.nodes[state.draggedNodeId];
+            
+            let newX = Math.max(0, initialNodeX + dx);
+            let newY = Math.max(0, initialNodeY + dy);
+
+            node.x = newX;
+            node.y = newY;
+            node.el.style.left = `${newX}px`;
+            node.el.style.top = `${newY}px`;
+
+            drawConnections();
+        });
+
+        window.addEventListener('mouseup', () => { state.draggedNodeId = null; });
+
+        function toggleConnectMode() {
+            state.isConnectMode = !state.isConnectMode;
+            const btn = document.getElementById('connectModeBtn');
+            if (state.isConnectMode) {
+                btn.textContent = 'CONECTAR: ON';
+                btn.classList.add('active-magenta');
+                workspace.style.cursor = 'crosshair';
+            } else {
+                btn.textContent = 'CONECTAR: OFF';
+                btn.classList.remove('active-magenta');
+                workspace.style.cursor = 'default';
+                clearConnectionSelection();
+            }
+        }
+
+        function clearConnectionSelection() {
+            if (state.sourceNodeIdForConnection && state.nodes[state.sourceNodeIdForConnection]) {
+                state.nodes[state.sourceNodeIdForConnection].el.classList.remove('selected-for-connection');
+            }
+            state.sourceNodeIdForConnection = null;
+        }
+
+        function handleConnectionClick(id) {
+            if (!state.sourceNodeIdForConnection) {
+                state.sourceNodeIdForConnection = id;
+                state.nodes[id].el.classList.add('selected-for-connection');
+            } else {
+                if (state.sourceNodeIdForConnection !== id) {
+                    const exists = state.connections.some(c => 
+                        c.source === state.sourceNodeIdForConnection && c.target === id
+                    );
+                    if (!exists) {
+                        state.connections.push({ source: state.sourceNodeIdForConnection, target: id });
+                        drawConnections();
+                    }
+                }
+                clearConnectionSelection();
+            }
+        }
+
+        function drawConnections() {
+            // Limpiar líneas viejas manteniendo el <defs>
+            const existingGroups = linesCanvas.querySelectorAll('.connection-group');
+            existingGroups.forEach(g => g.remove());
+
+            state.connections.forEach((conn, index) => {
+                const source = state.nodes[conn.source];
+                const target = state.nodes[conn.target];
+                if (!source || !target) return;
+
+                const sRect = {
+                    left: source.el.offsetLeft, top: source.el.offsetTop,
+                    width: source.el.offsetWidth, height: source.el.offsetHeight,
+                    right: source.el.offsetLeft + source.el.offsetWidth,
+                    bottom: source.el.offsetTop + source.el.offsetHeight
+                };
+                const tRect = {
+                    left: target.el.offsetLeft, top: target.el.offsetTop,
+                    width: target.el.offsetWidth, height: target.el.offsetHeight,
+                    right: target.el.offsetLeft + target.el.offsetWidth,
+                    bottom: target.el.offsetTop + target.el.offsetHeight
+                };
+
+                const sCenterX = sRect.left + sRect.width / 2;
+                const sCenterY = sRect.top + sRect.height / 2;
+                const tCenterX = tRect.left + tRect.width / 2;
+                const tCenterY = tRect.top + tRect.height / 2;
+
+                const dx = tCenterX - sCenterX;
+                const dy = tCenterY - sCenterY;
+
+                let startX, startY, endX, endY, pathData;
+                const arrowOffset = 6; 
+
+                // Ruteo Ortogonal Dinámico
+                if (Math.abs(dx) > Math.abs(dy)) {
+                    startY = sCenterY; endY = tCenterY;
+                    if (dx > 0) { startX = sRect.right; endX = tRect.left - arrowOffset; } 
+                    else { startX = sRect.left; endX = tRect.right + arrowOffset; }
+                    const midX = startX + (endX - startX) / 2;
+                    pathData = `M ${startX} ${startY} L ${midX} ${startY} L ${midX} ${endY} L ${endX} ${endY}`;
+                } else {
+                    startX = sCenterX; endX = tCenterX;
+                    if (dy > 0) { startY = sRect.bottom; endY = tRect.top - arrowOffset; } 
+                    else { startY = sRect.top; endY = tRect.bottom + arrowOffset; }
+                    const midY = startY + (endY - startY) / 2;
+                    pathData = `M ${startX} ${startY} L ${startX} ${midY} L ${endX} ${midY} L ${endX} ${endY}`;
+                }
+
+                const group = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+                group.setAttribute('class', 'connection-group');
+
+                const hitArea = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+                hitArea.setAttribute('d', pathData);
+                hitArea.setAttribute('class', 'connection-hit-area');
+
+                const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+                path.setAttribute('d', pathData);
+                path.setAttribute('class', 'connection-path');
+                path.setAttribute('marker-end', 'url(#arrowhead)');
+                
+                // Borrar conexión al hacer click en la línea
+                group.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    state.connections.splice(index, 1);
+                    drawConnections();
+                });
+                
+                group.appendChild(hitArea);
+                group.appendChild(path);
+                linesCanvas.appendChild(group);
+            });
+        }
+
+        async function downloadAsPNG() {
+            clearConnectionSelection();
+            
+            // 1. Ocultar botones X
+            document.querySelectorAll('.hide-on-export').forEach(el => el.style.display = 'none');
+            
+            // 2. Guardar zoom y forzar a 100%
+            const previousScale = currentScale;
+            setZoom(1.0);
+            await new Promise(r => setTimeout(r, 100));
+
+            // 3. Calcular caja delimitadora
+            const nodeIds = Object.keys(state.nodes);
+            let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+            
+            if (nodeIds.length > 0) {
+                nodeIds.forEach(id => {
+                    const node = state.nodes[id];
+                    minX = Math.min(minX, node.x);
+                    minY = Math.min(minY, node.y);
+                    maxX = Math.max(maxX, node.x + node.el.offsetWidth);
+                    maxY = Math.max(maxY, node.y + node.el.offsetHeight);
+                });
+            } else {
+                minX = 2000; minY = 2000; maxX = 3000; maxY = 3000;
+            }
+
+            const padding = 60;
+            minX = Math.max(0, minX - padding);
+            minY = Math.max(0, minY - padding);
+            maxX += padding;
+            maxY += padding;
+            
+            try {
+                // 4. Capturar pantalla
+                const canvas = await html2canvas(workspace, {
+                    backgroundColor: '#08080c',
+                    scale: 2,
+                    x: minX, y: minY,
+                    width: maxX - minX, height: maxY - minY,
+                    logging: false
+                });
+
+                const link = document.createElement('a');
+                link.download = 'neon-flow.png';
+                link.href = canvas.toDataURL("image/png");
+                link.click();
+            } catch (error) {
+                console.error(error);
+                alert("Error al generar la imagen.");
+            } finally {
+                // 5. Restaurar UI
+                document.querySelectorAll('.hide-on-export').forEach(el => el.style.display = '');
+                setZoom(previousScale);
+            }
+        }
+
+        document.getElementById('addNodeBtn').addEventListener('click', () => {
+            const x = (viewport.scrollLeft + viewport.clientWidth / 2) / currentScale - 125;
+            const y = (viewport.scrollTop + viewport.clientHeight / 2) / currentScale - 75;
+            createNode(x, y);
+        });
+        
+        document.getElementById('connectModeBtn').addEventListener('click', toggleConnectMode);
+        document.getElementById('downloadBtn').addEventListener('click', downloadAsPNG);
+
+        window.onload = () => {
+            // Centrar cámara al inicio
+            const startX = 2500 - viewport.clientWidth / 2;
+            const startY = 2500 - viewport.clientHeight / 2;
+            viewport.scrollLeft = startX;
+            viewport.scrollTop = startY;
+
+            // Bloques de ejemplo
+            const n1 = createNode(2500 - 250, 2500 - 150, "BLOQUE INICIAL");
+            const n2 = createNode(2500 - 250, 2500 + 50, "BLOQUE INFERIOR");
+            const n3 = createNode(2500 + 100, 2500 + 50, "BLOQUE LATERAL");
+
+            state.connections.push({source: n1, target: n2});
+            state.connections.push({source: n2, target: n3});
+            
+            drawConnections();
+        };
+    </script>
+</body>
+</html>
